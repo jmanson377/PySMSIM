@@ -16,6 +16,8 @@ class SMSIM:
         self.Xnext = None
         self.simplexN = 0
         self.covLimit = 0.5
+        self.Ya = None
+
         
     def __initial(self):
         """
@@ -35,6 +37,28 @@ class SMSIM:
 
         return np.array(x_initial)
 
+    def __boundary_check(self, suggestion, mid, worst):
+        """Check for boundary violations. N.B. I think this can be optimised"""
+        Ya = None
+        index_lb = suggestion < self.lb
+        index_ub = suggestion > self.ub
+        modified = suggestion
+        while np.any(index_lb) and np.any(index_ub):
+            if np.any(index_lb): # lower bound violation
+                Ya = 1 + ((self.lb[index_lb] - mid[index_lb]) / (mid[index_lb] - worst[index_lb]))
+                if Ya < 1.5: Ya = 0.5
+                modified = Ya * mid + ((1-Ya) * worst)
+        
+            if np.any(index_ub): # upper bound violation
+                Ya = 1 + ((self.ub[index_ub] - mid[index_ub]) / (mid[index_ub] - worst[index_ub]))
+                if Ya < 1.5: Ya = 0.5
+                modified = Ya * mid + ((1-Ya) * worst)
+            
+            index_lb = suggestion < self.lb
+            index_ub = suggestion > self.ub
+        
+        return modified, Ya
+
     def suggest(self, y=None):
         """
         Suggest conditions if user is running a batch optimisation
@@ -53,10 +77,19 @@ class SMSIM:
             self.y[-1].append(y)
             # Sort outputs to determine midpoint
             ind = np.argsort(y)
+
             mid = np.mean(self.X[-1][ind[:-1]])
             mid_p = np.mean(self.y[-1][ind[:-1]])
+
+            worst = self.X[-1][ind[-1]]
+
+            reflect = 2 * mid - worst
+
+            self.Xnext, self.Ya = self.__boundary_check(reflect, mid, worst)
+            self.X[-1] = np.vstack((self.X[-1], reflect))
+
+            return self.Xnext
             
-            raise NotImplementedError
         elif ncurrent == (self.nvar + 2): # Optimum calculation and request
             raise NotImplementedError
         elif ncurrent == (self.nvar + 3): # Calculate retention and move onto next 'simplex' iteration
@@ -66,10 +99,6 @@ class SMSIM:
     def optimise(self, func):
         """Closed loop optimisation of a given function, will only output optimisation result to user"""
         raise NotImplementedError       
-    
-    def __boundary_check(self):
-        """Check for boundary violations"""
-        raise NotImplementedError
 
     def __cov_calc(self, responses):
         """Calculate COV for termination criteria"""
