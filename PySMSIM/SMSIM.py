@@ -29,8 +29,8 @@ class SMSIM:
         """
         Generate initial conditions for optimisation given instantiation
         """
-        delta = 0.3
-        zero_delta = 0.025
+        delta = 0.05
+        zero_delta = 0.00025
         x_initial = []
         x_initial.append(self.x0)
         for i in range(len(self.x0)):
