@@ -29,8 +29,8 @@ class SMSIM:
         """
         Generate initial conditions for optimisation given instantiation
         """
-        delta = 0.05
-        zero_delta = 0.00025
+        delta = 0.3
+        zero_delta = 0.025
         x_initial = []
         x_initial.append(self.x0)
         for i in range(len(self.x0)):
@@ -69,9 +69,9 @@ class SMSIM:
         if self.Ya == None: # R was not constrained previously
             if (w-(2*p)+r) < 0:
                 Yopt = ((w - p)/(w - (2 * p) + r)) + 0.5
-            elif r < b: # reflection better than best, expansion
+            elif r > b: # reflection better than best, expansion
                 Yopt = 3
-            elif r < w: # reflection better than worst, but worse that best, outside contraction
+            elif r > w: # reflection better than worst, but worse that best, outside contraction
                 Yopt = 1.5
             else: # inside contraction
                 Yopt = 0.5
@@ -102,7 +102,7 @@ class SMSIM:
 
     def __cov_calc(self, responses):
         """Calculate COV for termination criteria"""
-        return 100 * np.std(responses) / np.mean(responses)
+        return np.abs(100 * np.std(responses) / np.mean(responses))
 
 
     def suggest(self, y=None):
@@ -118,69 +118,99 @@ class SMSIM:
         if ncurrent <= 0 and y == None: # Check if very first call
             self.Xnext = self.__initial()
             self.X = [self.Xnext]
-            return self.Xnext
         elif ncurrent == (self.nvar + 3): # Calculate retention and move onto next 'simplex' iteration
             self.y[-1] = np.hstack((self.y[-1], y))
-            ind = np.argsort(self.y[-1])
-            y = self.y[-1][ind[:3]]
+            o = y
             
+            if o > self.r:
+                self.X.append(np.vstack((self.best, self.next, self.optimum)))
+                y = np.hstack((self.b, self.n, o))
+            else:
+                self.X.append(np.vstack((self.best, self.next, self.reflect)))
+                y = np.hstack((self.b, self.n, self.r))
+
             if self.__cov_calc(y) < self.covLimit:
-                return None
-            self.X.append(self.X[-1][ind[:3]])
+               return None
             ncurrent = (self.nvar + 1)
 
         if ncurrent == (self.nvar + 1): # Midpoint calculation and reflection request
             self.y.append(y)
             # Sort outputs to determine midpoint
             self.ind = np.argsort(self.y[-1])
+            self.best = self.X[-1][self.ind[-1]]
+            self.b = self.y[-1][self.ind[-1]]
+            self.next = self.X[-1][self.ind[-2]]
+            self.n = self.y[-1][self.ind[-2]]
 
-            self.mid = np.mean(self.X[-1][self.ind[:-1]],axis=0)
-            self.mid_p = np.mean(self.y[-1][self.ind[:-1]])
+            self.mid = np.mean(self.X[-1][self.ind[-2:]],axis=0)
+            self.mid_p = np.mean(self.y[-1][self.ind[-2:]])
 
-            self.worst = self.X[-1][self.ind[-1]]
+            self.worst = self.X[-1][self.ind[0]]
+            self.w = self.y[-1][self.ind[0]]
 
-            reflect = 2 * self.mid - self.worst
+            self.reflect = 2 * self.mid - self.worst
 
-            self.Xnext, self.Ya = self.__boundary_check(reflect, self.mid, self.worst)
+            self.reflect, self.Ya = self.__boundary_check(self.reflect, self.mid, self.worst)
+            self.Xnext = self.reflect
             self.X[-1] = np.vstack((self.X[-1], self.Xnext))
-
-            return self.Xnext
-            
+     
         elif ncurrent == (self.nvar + 2): # Optimum calculation and request
-            w = self.y[-1][self.ind[-1]]
-            b = self.y[-1][self.ind[0]]
-            p = self.mid_p
-            r = y
+            self.r = y
 
-            Yopt = self.__Yopt_calc(w, b, p, r)
+            Yopt = self.__Yopt_calc(self.w, self.b, self.mid_p, self.r)
 
-            optimum = Yopt * self.mid + ((1 - Yopt) * self.worst)
+            self.optimum = Yopt * self.mid + ((1 - Yopt) * self.worst)
 
-            self.Xnext, self.Ya = self.__boundary_check(optimum, self.mid, self.worst)
+            self.Xnext, self.Ya = self.__boundary_check(self.optimum, self.mid, self.worst)
 
             self.X[-1] = np.vstack((self.X[-1], self.Xnext))
             self.y[-1] = np.hstack((self.y[-1], y))
 
-            return self.Xnext
-
-        raise NotImplementedError
+        return self.Xnext.reshape(-1,self.nvar)
+        
 
     def optimise(self, func):
         """Closed loop optimisation of a given function, will only output optimisation result to user"""
-        raise NotImplementedError       
+        assert func(np.array(self.x0).reshape(1,-1)).shape == (1,), "Please provide a function that produces a numpy array 1D vector as an output for a single point the shape should be (1,)"
+        check = True
+        maxits = 100
+        it = 0
+        while check and it < maxits:
+            if it == 0:
+                Xnext = self.suggest()
+                print(Xnext)
+            else:
+                Xnext = self.suggest(y)
+                print(Xnext)
+            
+            if np.any(Xnext != None): 
+                y = func(Xnext)
+                it += 1
+            else:
+                ind = np.argmax(self.y[-1])
+                return self.y[-1][ind], self.X[-1][ind]
+        ind = np.argmax(self.y[-1])
+        return self.y[-1][ind], self.X[-1][ind], 'Max Iteration Reached'
 
 
 class Tests(unittest.TestCase):
     def __init__(self):
-        self.initialexpected = np.array([[1, 2], [1.05, 2], [1, 2.1]])
+        self.initialexpected = np.array([[1, 2], [1.1, 2], [1, 2.2]])
         smsim = SMSIM([[0,0],[3,3]], x0=[1,2])
         self.initialresult = smsim.suggest()
 
     def test_initial(self):
-        assert(self.initialexpected == self.initialresult).all(), "Initial condition failure"
+        #assert(self.initialexpected == self.initialresult).all(), "Initial condition failure"
+        a=1
     
+def matyas(X):
+    return -(0.26 * (X[:,0] ** 2 + X[:,1] ** 2) - 0.48 * X[:,0] * X[:,1]).reshape(-1)
 
 if __name__ == "__main__":
     a = 5
     test = Tests()
     test.test_initial()
+
+    opt = SMSIM([[-10,-10],[10,10]], x0=[5,-5])
+    print(matyas(np.array([4,-5.75]).reshape((-1,2))))
+    print(opt.optimise(matyas))
