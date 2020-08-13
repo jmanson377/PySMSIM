@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 import unittest
 
 class SMSIM:
@@ -23,14 +24,22 @@ class SMSIM:
         self.YoptMin = -1
         self.YoptMax = 3
         self.YoptMargin = 0.3
-
+        self.reflect = None
+        self.r = None
+        self.n = None
+        self.next = None
+        self.best = None
+        self.b = None
+        self.optimum = None
+        self.tolx = 1e-4
+        self.tolf = 1e-4
         
     def __initial(self):
         """
         Generate initial conditions for optimisation given instantiation
         """
         delta = 0.05
-        zero_delta = 0.00025
+        zero_delta = 0.000025
         x_initial = []
         x_initial.append(self.x0)
         for i in range(len(self.x0)):
@@ -51,17 +60,19 @@ class SMSIM:
         modified = suggestion
         while np.any(index_lb) and np.any(index_ub):
             if np.any(index_lb): # lower bound violation
-                Ya = 1 + ((self.lb[index_lb] - mid[index_lb]) / (mid[index_lb] - worst[index_lb]))
+                ind = int(np.argwhere(index_lb).reshape(-1))
+                Ya = 1 + ((self.lb[ind] - mid[ind]) / (mid[ind] - worst[ind]))
                 if Ya < 1.5: Ya = 0.5
                 modified = Ya * mid + ((1-Ya) * worst)
         
             if np.any(index_ub): # upper bound violation
-                Ya = 1 + ((self.ub[index_ub] - mid[index_ub]) / (mid[index_ub] - worst[index_ub]))
+                ind = int(np.argwhere(index_lb).reshape(-1))
+                Ya = 1 + ((self.ub[ind] - mid[ind]) / (mid[ind] - worst[ind]))
                 if Ya < 1.5: Ya = 0.5
                 modified = Ya * mid + ((1-Ya) * worst)
             
-            index_lb = suggestion < self.lb
-            index_ub = suggestion > self.ub
+            index_lb = modified < self.lb
+            index_ub = modified > self.ub
         
         return modified, Ya
 
@@ -121,6 +132,7 @@ class SMSIM:
         elif ncurrent == (self.nvar + 3): # Calculate retention and move onto next 'simplex' iteration
             self.y[-1] = np.hstack((self.y[-1], y))
             o = y
+            print(self.X[-1])
             
             if o > self.r:
                 self.X.append(np.vstack((self.best, self.next, self.optimum)))
@@ -129,7 +141,7 @@ class SMSIM:
                 self.X.append(np.vstack((self.best, self.next, self.reflect)))
                 y = np.hstack((self.b, self.n, self.r))
 
-            if self.__cov_calc(y) < self.covLimit:
+            if (self.__cov_calc(y) < self.covLimit) or (np.max(np.abs(np.diff(y))) <= self.tolf and np.max(np.max(np.abs(np.diff(self.X[-1])))) <= self.tolx):
                return None
             ncurrent = (self.nvar + 1)
 
@@ -177,40 +189,52 @@ class SMSIM:
         it = 0
         while check and it < maxits:
             if it == 0:
-                Xnext = self.suggest()
-                print(Xnext)
+                y = None
+                Xnext = self.suggest(y)
             else:
                 Xnext = self.suggest(y)
-                print(Xnext)
             
             if np.any(Xnext != None): 
                 y = func(Xnext)
                 it += 1
             else:
                 ind = np.argmax(self.y[-1])
-                return self.y[-1][ind], self.X[-1][ind]
+                return self.y[-1][ind], self.X[-2][ind], "Terminated within " + str(it) + " iterations"
         ind = np.argmax(self.y[-1])
         return self.y[-1][ind], self.X[-1][ind], 'Max Iteration Reached'
 
 
 class Tests(unittest.TestCase):
     def __init__(self):
-        self.initialexpected = np.array([[1, 2], [1.1, 2], [1, 2.2]])
+        self.initialexpected = np.array([[1, 2], [1.05, 2], [1, 2.1]])
         smsim = SMSIM([[0,0],[3,3]], x0=[1,2])
         self.initialresult = smsim.suggest()
 
     def test_initial(self):
-        #assert(self.initialexpected == self.initialresult).all(), "Initial condition failure"
-        a=1
+        assert(self.initialexpected == self.initialresult).all(), "Initial condition failure"
     
 def matyas(X):
     return -(0.26 * (X[:,0] ** 2 + X[:,1] ** 2) - 0.48 * X[:,0] * X[:,1]).reshape(-1)
 
+def sphere(X):
+    return -np.sum(X**2, axis=1).reshape(-1)
+
 if __name__ == "__main__":
-    a = 5
     test = Tests()
     test.test_initial()
 
-    opt = SMSIM([[-10,-10],[10,10]], x0=[5,-5])
+    opt = SMSIM([[-10,-10],[10,10]], x0=[1, -6])
     print(matyas(np.array([4,-5.75]).reshape((-1,2))))
     print(opt.optimise(matyas))
+    for set in opt.X:
+        plt.plot(set[:,0], set[:,1])
+    plt.show()
+    
+
+    opt2 = SMSIM([[-10,-10],[10,10]], x0=[6, -6])
+    print(opt2.optimise(sphere))
+
+    for set in opt2.X:
+        plt.plot(set[:,0], set[:,1])
+    plt.show()
+

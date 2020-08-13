@@ -1,1 +1,1 @@
-from . import examples
+from .SMSIM import SMSIM
